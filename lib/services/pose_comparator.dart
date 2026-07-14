@@ -36,26 +36,6 @@ class PoseComparator {
         u.rightHip,
         t.rightHip,
       ),
-      '左腿': _leg(
-        u.leftShoulder,
-        u.leftHip,
-        u.leftKnee,
-        u.leftAnkle,
-        t.leftShoulder,
-        t.leftHip,
-        t.leftKnee,
-        t.leftAnkle,
-      ),
-      '右腿': _leg(
-        u.rightShoulder,
-        u.rightHip,
-        u.rightKnee,
-        u.rightAnkle,
-        t.rightShoulder,
-        t.rightHip,
-        t.rightKnee,
-        t.rightAnkle,
-      ),
       '躯干': _angleScore(
         _angle(u.leftShoulder, u.shoulderMid, u.hipMid),
         _angle(t.leftShoulder, t.shoulderMid, t.hipMid),
@@ -63,11 +43,7 @@ class PoseComparator {
       ),
     };
     final score =
-        scores['左臂']! * .25 +
-        scores['右臂']! * .25 +
-        scores['左腿']! * .2 +
-        scores['右腿']! * .2 +
-        scores['躯干']! * .1;
+        scores['左臂']! * .45 + scores['右臂']! * .45 + scores['躯干']! * .1;
     final worst = scores.entries.reduce((a, b) => a.value < b.value ? a : b);
     final suggestion =
         worst.value >= 85
@@ -129,29 +105,6 @@ class PoseComparator {
       60,
     );
     return elbowScore * .4 + shoulderScore * .6;
-  }
-
-  static double _leg(
-    PosePoint shoulder,
-    PosePoint hip,
-    PosePoint knee,
-    PosePoint ankle,
-    PosePoint tShoulder,
-    PosePoint tHip,
-    PosePoint tKnee,
-    PosePoint tAnkle,
-  ) {
-    final kneeScore = _angleScore(
-      _angle(hip, knee, ankle),
-      _angle(tHip, tKnee, tAnkle),
-      40,
-    );
-    final hipScore = _angleScore(
-      _angle(shoulder, hip, knee),
-      _angle(tShoulder, tHip, tKnee),
-      50,
-    );
-    return kneeScore * .5 + hipScore * .5;
   }
 
   static double _angle(PosePoint a, PosePoint b, PosePoint c) {

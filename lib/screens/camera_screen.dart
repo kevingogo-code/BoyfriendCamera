@@ -200,7 +200,7 @@ class _CameraScreenState extends State<CameraScreen>
     final score = _smoothedScore * .6 + result.match.score * .4;
     final person = result.keypoints.bounds;
     final targetHeight = template.heightRatio * _poseScale;
-    final targetWidth = targetHeight * .75;
+    final targetWidth = targetHeight * template.aspectRatio;
     final targetCenter =
         template.centerX +
         (_viewfinderSize.width == 0
@@ -538,7 +538,7 @@ class _CameraScreenState extends State<CameraScreen>
 
   Widget _buildSilhouette(PoseTemplate template, Size viewport) {
     final height = viewport.height * template.heightRatio;
-    final width = height * .75;
+    final width = height * template.aspectRatio;
     final left = viewport.width * template.centerX - width / 2;
     final top = viewport.height * template.centerY - height / 2;
     return Positioned(
