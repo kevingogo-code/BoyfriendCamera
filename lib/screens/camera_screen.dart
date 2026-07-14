@@ -308,23 +308,17 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Future<void> _cyclePose() async {
-    final next = _poseIndex >= poseTemplates.length - 1 ? -1 : _poseIndex + 1;
+    final next = (_poseIndex + 1) % poseTemplates.length;
     setState(() {
       _poseIndex = next;
       _poseScale = 1;
       _poseOffset = Offset.zero;
       _smoothedScore = 0;
-      _instruction = next < 0 ? '姿势引导已关闭' : '站在轮廓内';
-      _stateLabel = next < 0 ? '引导关闭' : '检测中';
-      _guideColor = next < 0 ? Colors.white70 : const Color(0xFFFF6B6B);
+      _instruction = '站在轮廓内';
+      _stateLabel = '检测中';
+      _guideColor = const Color(0xFFFF6B6B);
     });
-    if (next < 0) {
-      await _stopAnalysis();
-      _notify('姿势轮廓引导 已关闭');
-    } else {
-      await _startAnalysis();
-      _notify('姿势模板：${poseTemplates[next].name}');
-    }
+    await _startAnalysis();
   }
 
   void _notify(String message) {
