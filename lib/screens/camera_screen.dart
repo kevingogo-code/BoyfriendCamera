@@ -175,21 +175,28 @@ class _CameraScreenState extends State<CameraScreen>
   void _analyzeFrame(CameraImage image) {
     final now = DateTime.now();
     final template = _activePose;
+    final controller = _controller;
+    final camera = _camera;
     if (template != null &&
+        controller != null &&
+        camera != null &&
         !_hasManualPoseAdjustment &&
         now.difference(_lastCompositionAnalysis) >=
             const Duration(milliseconds: 1500)) {
       _lastCompositionAnalysis = now;
       _applyCompositionResult(
-        _compositionAnalyzer.analyze(image: image, template: template),
+        _compositionAnalyzer.analyze(
+          image: image,
+          camera: camera,
+          deviceOrientation: controller.value.deviceOrientation,
+          template: template,
+        ),
       );
     }
     if (_processingFrame ||
         now.difference(_lastAnalysis) < const Duration(milliseconds: 420)) {
       return;
     }
-    final controller = _controller;
-    final camera = _camera;
     final activeTemplate = _activePose;
     if (controller == null || camera == null || activeTemplate == null) return;
     _processingFrame = true;
@@ -210,6 +217,13 @@ class _CameraScreenState extends State<CameraScreen>
 
   void _applyCompositionResult(CompositionLayout layout) {
     if (!mounted || _hasManualPoseAdjustment || _capturedPath != null) return;
+    final template = _activePose;
+    final current = _autoLayout;
+    if (template != null &&
+        current != null &&
+        layout.isCloseTo(current, template)) {
+      return;
+    }
     setState(() {
       _autoLayout = layout;
       _compositionLabel = layout.label;
@@ -232,7 +246,7 @@ class _CameraScreenState extends State<CameraScreen>
     final layout = _activeLayout;
     final score = _smoothedScore * .6 + result.match.score * .4;
     final person = result.keypoints.bounds;
-    final targetHeight = layout.heightRatio * _poseScale;
+    final targetHeight = layout.heightFor(template) * _poseScale;
     final targetWidth = targetHeight * template.aspectRatio;
     final targetCenter =
         layout.centerX +
@@ -574,11 +588,13 @@ class _CameraScreenState extends State<CameraScreen>
 
   Widget _buildSilhouette(PoseTemplate template, Size viewport) {
     final layout = _activeLayout;
-    final height = viewport.height * layout.heightRatio;
+    final height = viewport.height * layout.heightFor(template);
     final width = height * template.aspectRatio;
     final left = viewport.width * layout.centerX - width / 2;
     final top = viewport.height * layout.centerY - height / 2;
-    return Positioned(
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
       left: left,
       top: top,
       width: width,

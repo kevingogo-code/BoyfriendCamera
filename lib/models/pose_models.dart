@@ -1,28 +1,71 @@
 import 'dart:math' as math;
 
-enum CompositionStyle { defaultCenter, centeredSymmetry, leftThird, rightThird }
+enum CompositionStyle {
+  defaultCenter,
+  centeredSymmetry,
+  leadingLines,
+  leftThird,
+  rightThird,
+}
 
 class CompositionLayout {
   const CompositionLayout({
     required this.style,
     required this.centerX,
     required this.centerY,
-    required this.heightRatio,
+    required this.targetWidthRatio,
+    required this.targetHeightRatio,
+    this.topSafeMargin = .06,
+    this.bottomSafeMargin = .05,
+    this.sideSafeMargin = .04,
     required this.label,
   });
 
   final CompositionStyle style;
   final double centerX;
   final double centerY;
-  final double heightRatio;
+  final double targetWidthRatio;
+  final double targetHeightRatio;
+  final double topSafeMargin;
+  final double bottomSafeMargin;
+  final double sideSafeMargin;
   final String label;
+
+  /// Fits a pose into the composition's safe target region without changing
+  /// the original silhouette aspect ratio.
+  double heightFor(PoseTemplate template) {
+    final availableHeight = targetHeightRatio.clamp(.42, .9);
+    final availableWidth = targetWidthRatio.clamp(.24, .92);
+    final widthLimitedHeight = availableWidth / template.aspectRatio;
+    final verticalSafeHeight = math.min(
+      2 * (centerY - topSafeMargin),
+      2 * (1 - bottomSafeMargin - centerY),
+    );
+    final horizontalSafeWidth =
+        2 * math.min(centerX - sideSafeMargin, 1 - sideSafeMargin - centerX);
+    final horizontalSafeHeight = horizontalSafeWidth / template.aspectRatio;
+    return math
+        .min(
+          math.min(availableHeight, widthLimitedHeight),
+          math.min(verticalSafeHeight, horizontalSafeHeight),
+        )
+        .clamp(.42, .9);
+  }
+
+  bool isCloseTo(CompositionLayout other, PoseTemplate template) {
+    return style == other.style &&
+        (centerX - other.centerX).abs() < .018 &&
+        (centerY - other.centerY).abs() < .018 &&
+        (heightFor(template) - other.heightFor(template)).abs() < .08;
+  }
 
   factory CompositionLayout.defaultFor(PoseTemplate template) =>
       CompositionLayout(
         style: CompositionStyle.defaultCenter,
         centerX: template.centerX,
         centerY: template.centerY,
-        heightRatio: template.heightRatio,
+        targetWidthRatio: .58,
+        targetHeightRatio: template.heightRatio,
         label: '自动居中',
       );
 }
