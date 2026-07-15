@@ -7,6 +7,7 @@ import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 
 import '../models/pose_models.dart';
 import 'pose_comparator.dart';
+import 'yuv420_converter.dart';
 
 class PoseFrameResult {
   const PoseFrameResult({required this.keypoints, required this.match});
@@ -68,22 +69,66 @@ class PoseAnalyzer {
               : (camera.sensorOrientation - compensation + 360) % 360;
       rotation = InputImageRotationValue.fromRawValue(compensation);
     }
-    final format = InputImageFormatValue.fromRawValue(image.format.raw);
-    if (rotation == null || format == null || image.planes.length != 1) {
+    if (rotation == null) return null;
+
+    late Uint8List bytes;
+    late InputImageFormat format;
+    late int bytesPerRow;
+    if (Platform.isAndroid) {
+      if (image.format.group == ImageFormatGroup.nv21 &&
+          image.planes.length == 1) {
+        final plane = image.planes.first;
+        bytes = plane.bytes;
+        bytesPerRow = plane.bytesPerRow;
+      } else if (image.format.group == ImageFormatGroup.yuv420 &&
+          image.planes.length == 3) {
+        final y = image.planes[0];
+        final u = image.planes[1];
+        final v = image.planes[2];
+        final converted = convertYuv420ToNv21(
+          width: image.width,
+          height: image.height,
+          yPlane: YuvPlaneData(
+            bytes: y.bytes,
+            bytesPerRow: y.bytesPerRow,
+            bytesPerPixel: y.bytesPerPixel ?? 1,
+          ),
+          uPlane: YuvPlaneData(
+            bytes: u.bytes,
+            bytesPerRow: u.bytesPerRow,
+            bytesPerPixel: u.bytesPerPixel ?? 1,
+          ),
+          vPlane: YuvPlaneData(
+            bytes: v.bytes,
+            bytesPerRow: v.bytesPerRow,
+            bytesPerPixel: v.bytesPerPixel ?? 1,
+          ),
+        );
+        if (converted == null) return null;
+        bytes = converted;
+        bytesPerRow = image.width;
+      } else {
+        return null;
+      }
+      format = InputImageFormat.nv21;
+    } else if (Platform.isIOS &&
+        image.format.group == ImageFormatGroup.bgra8888 &&
+        image.planes.length == 1) {
+      final plane = image.planes.first;
+      bytes = plane.bytes;
+      bytesPerRow = plane.bytesPerRow;
+      format = InputImageFormat.bgra8888;
+    } else {
       return null;
     }
-    if ((Platform.isAndroid && format != InputImageFormat.nv21) ||
-        (Platform.isIOS && format != InputImageFormat.bgra8888)) {
-      return null;
-    }
-    final plane = image.planes.first;
+
     final input = InputImage.fromBytes(
-      bytes: plane.bytes,
+      bytes: bytes,
       metadata: InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: rotation,
         format: format,
-        bytesPerRow: plane.bytesPerRow,
+        bytesPerRow: bytesPerRow,
       ),
     );
     return _ConvertedImage(input, rotation);

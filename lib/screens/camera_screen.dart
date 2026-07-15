@@ -40,6 +40,7 @@ class _CameraScreenState extends State<CameraScreen>
 
   bool _initializing = false;
   bool _processingFrame = false;
+  bool _processingScene = false;
   bool _capturing = false;
   DateTime _lastAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastCompositionAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
@@ -190,48 +191,55 @@ class _CameraScreenState extends State<CameraScreen>
     final template = _activePose;
     final controller = _controller;
     final camera = _camera;
-    if (template != null &&
-        controller != null &&
-        camera != null &&
+    if (template == null || controller == null || camera == null) return;
+
+    // Start the high-frequency pose task first. Scene inference has a separate
+    // cadence and must never prevent a due pose frame from reaching ML Kit.
+    if (!_processingFrame &&
+        now.difference(_lastAnalysis) >= const Duration(milliseconds: 420)) {
+      _processingFrame = true;
+      _lastAnalysis = now;
+      _poseAnalyzer
+          .analyze(
+            image: image,
+            camera: camera,
+            deviceOrientation: controller.value.deviceOrientation,
+            template: template,
+          )
+          .then(_applyPoseResult)
+          .catchError((Object error, StackTrace stack) {
+            if (kDebugMode) debugPrint('Pose analysis failed: $error');
+          })
+          .whenComplete(() => _processingFrame = false);
+    }
+
+    if (!_processingScene &&
         !_hasManualPoseAdjustment &&
         now.difference(_lastCompositionAnalysis) >=
             const Duration(milliseconds: 1800)) {
+      _processingScene = true;
       _lastCompositionAnalysis = now;
-      final candidate = _sceneClassifier.analyze(image);
-      if (candidate != null && candidate.confidence >= .60) {
-        _scene = candidate;
-      }
-      _applyCompositionResult(
-        _compositionAnalyzer.analyze(
-          image: image,
-          camera: camera,
-          deviceOrientation: controller.value.deviceOrientation,
-          template: template,
+      try {
+        final candidate = _sceneClassifier.analyze(image);
+        if (candidate != null && candidate.confidence >= .60) {
+          _scene = candidate;
+        }
+        _applyCompositionResult(
+          _compositionAnalyzer.analyze(
+            image: image,
+            camera: camera,
+            deviceOrientation: controller.value.deviceOrientation,
+            template: template,
+            scene: _scene,
+          ),
           scene: _scene,
-        ),
-        scene: _scene,
-      );
+        );
+      } catch (error) {
+        if (kDebugMode) debugPrint('Scene analysis failed: $error');
+      } finally {
+        _processingScene = false;
+      }
     }
-    if (_processingFrame ||
-        now.difference(_lastAnalysis) < const Duration(milliseconds: 420)) {
-      return;
-    }
-    final activeTemplate = _activePose;
-    if (controller == null || camera == null || activeTemplate == null) return;
-    _processingFrame = true;
-    _lastAnalysis = now;
-    _poseAnalyzer
-        .analyze(
-          image: image,
-          camera: camera,
-          deviceOrientation: controller.value.deviceOrientation,
-          template: activeTemplate,
-        )
-        .then(_applyPoseResult)
-        .catchError((Object error, StackTrace stack) {
-          if (kDebugMode) debugPrint('Pose analysis failed: $error');
-        })
-        .whenComplete(() => _processingFrame = false);
   }
 
   void _applyCompositionResult(
