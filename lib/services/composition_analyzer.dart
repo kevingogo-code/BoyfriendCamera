@@ -34,13 +34,21 @@ class CompositionAnalyzer {
     SceneClassification? scene,
   }) {
     if (image.planes.isEmpty || image.width < 2 || image.height < 2) {
-      return _forScene(scene, template, CompositionLayout.defaultFor(template));
+      return refineForScene(
+        scene,
+        template,
+        CompositionLayout.defaultFor(template),
+      );
     }
 
     final rotation = _rotationFor(camera, deviceOrientation);
     final values = _samplePortraitLuma(image, rotation);
     if (values == null) {
-      return _forScene(scene, template, CompositionLayout.defaultFor(template));
+      return refineForScene(
+        scene,
+        template,
+        CompositionLayout.defaultFor(template),
+      );
     }
     final features = _inspect(values);
 
@@ -51,7 +59,7 @@ class CompositionAnalyzer {
         0.0,
         1.0,
       );
-      return _forScene(
+      return refineForScene(
         scene,
         template,
         CompositionLayout(
@@ -59,7 +67,7 @@ class CompositionAnalyzer {
           centerX: .5,
           centerY: .51,
           targetWidthRatio: .46 + structuralConfidence * .12,
-          targetHeightRatio: .68 + structuralConfidence * .14,
+          subjectHeightRatio: .68 + structuralConfidence * .14,
           label: '对称居中',
         ),
       );
@@ -73,7 +81,7 @@ class CompositionAnalyzer {
       final centerY = (vanishingPoint.dy / _rows + .2).clamp(.46, .62);
       final safeHeight = _safeHeightFor(centerY);
       final corridorWidth = features.corridorWidth ?? .46;
-      return _forScene(
+      return refineForScene(
         scene,
         template,
         CompositionLayout(
@@ -81,7 +89,7 @@ class CompositionAnalyzer {
           centerX: (vanishingPoint.dx / _columns).clamp(.33, .67),
           centerY: centerY,
           targetWidthRatio: (corridorWidth * .76).clamp(.32, .62),
-          targetHeightRatio: safeHeight,
+          subjectHeightRatio: safeHeight,
           label: '引导线构图',
         ),
       );
@@ -92,7 +100,7 @@ class CompositionAnalyzer {
     if (features.energyGap > .18) {
       final leftIsQuieter = features.leftEnergy < features.rightEnergy;
       final spaceStrength = ((features.energyGap - .18) / .45).clamp(0.0, 1.0);
-      return _forScene(
+      return refineForScene(
         scene,
         template,
         CompositionLayout(
@@ -103,77 +111,87 @@ class CompositionAnalyzer {
           centerX: leftIsQuieter ? .67 : .33,
           centerY: .52,
           targetWidthRatio: .42 + spaceStrength * .14,
-          targetHeightRatio: .68 + spaceStrength * .1,
+          subjectHeightRatio: .68 + spaceStrength * .1,
           label: '三分留白',
         ),
       );
     }
 
-    return _forScene(scene, template, CompositionLayout.defaultFor(template));
+    return refineForScene(
+      scene,
+      template,
+      CompositionLayout.defaultFor(template),
+    );
   }
 
-  /// Semantic classification changes the fallback composition when the frame
-  /// has no sufficiently strong geometric cue. Strong symmetry/leading-line
-  /// cues still win because they identify the actual usable area precisely.
-  CompositionLayout _forScene(
+  /// Scene semantics decide how large the person should be. Geometry decides
+  /// where the person should stand and can constrain that target to a safe
+  /// region, but it no longer discards the scene's near/far composition intent.
+  CompositionLayout refineForScene(
     SceneClassification? scene,
     PoseTemplate template,
     CompositionLayout geometricLayout,
   ) {
-    if (scene == null ||
-        scene.confidence < .60 ||
-        geometricLayout.style != CompositionStyle.defaultCenter) {
+    if (scene == null || scene.confidence < .60) {
       return geometricLayout;
     }
-    switch (scene.label) {
-      case 'building':
-        return const CompositionLayout(
-          style: CompositionStyle.rightThird,
-          centerX: .67,
-          centerY: .54,
-          targetWidthRatio: .38,
-          targetHeightRatio: .76,
-          label: '楼宇三分构图',
-        );
-      case 'street':
-        return const CompositionLayout(
-          style: CompositionStyle.leadingLines,
-          centerX: .5,
-          centerY: .55,
-          targetWidthRatio: .40,
-          targetHeightRatio: .74,
-          label: '街道引导线',
-        );
-      case 'storefront':
-        return const CompositionLayout(
-          style: CompositionStyle.leftThird,
-          centerX: .34,
-          centerY: .54,
-          targetWidthRatio: .40,
-          targetHeightRatio: .73,
-          label: '店铺留白构图',
-        );
-      case 'urban_nature':
-        return const CompositionLayout(
-          style: CompositionStyle.rightThird,
-          centerX: .66,
-          centerY: .53,
-          targetWidthRatio: .42,
-          targetHeightRatio: .72,
-          label: '绿意留白构图',
-        );
-      case 'busy':
-        return CompositionLayout(
-          style: CompositionStyle.defaultCenter,
-          centerX: .5,
-          centerY: .52,
-          targetWidthRatio: .44,
-          targetHeightRatio: template.heightRatio.clamp(.66, .74),
-          label: '热闹街景居中',
-        );
-      default:
-        return geometricLayout;
+    final strength = ((scene.confidence - .60) / .40).clamp(0.0, 1.0);
+    final semanticLayout = switch (scene.label) {
+      'building' => CompositionLayout(
+        style: CompositionStyle.rightThird,
+        centerX: .67,
+        centerY: .54,
+        targetWidthRatio: .46,
+        subjectHeightRatio: .62 - strength * .04,
+        label: '楼宇环境人像',
+      ),
+      'street' => CompositionLayout(
+        style: CompositionStyle.leadingLines,
+        centerX: .5,
+        centerY: .55,
+        targetWidthRatio: .44,
+        subjectHeightRatio: .69 - strength * .02,
+        label: '街道引导线',
+      ),
+      'storefront' => const CompositionLayout(
+        style: CompositionStyle.leftThird,
+        centerX: .34,
+        centerY: .54,
+        targetWidthRatio: .46,
+        subjectHeightRatio: .74,
+        label: '店铺留白构图',
+      ),
+      'urban_nature' => CompositionLayout(
+        style: CompositionStyle.rightThird,
+        centerX: .66,
+        centerY: .53,
+        targetWidthRatio: .46,
+        subjectHeightRatio: .70 - strength * .02,
+        label: '绿意留白构图',
+      ),
+      'busy' => CompositionLayout(
+        style: CompositionStyle.defaultCenter,
+        centerX: .5,
+        centerY: .52,
+        targetWidthRatio: .52,
+        subjectHeightRatio: .80 + strength * .04,
+        label: '热闹街景居中',
+      ),
+      _ => null,
+    };
+    if (semanticLayout == null) return geometricLayout;
+
+    final targetHeight = semanticLayout.subjectHeightRatio.clamp(
+      template.minimumHeightRatio,
+      template.maximumHeightRatio,
+    );
+    if (geometricLayout.style == CompositionStyle.defaultCenter) {
+      return semanticLayout.copyWith(subjectHeightRatio: targetHeight);
     }
+    return geometricLayout.copyWith(
+      subjectHeightRatio: targetHeight,
+      label: '${semanticLayout.label} · ${geometricLayout.label}',
+    );
   }
 
   double _safeHeightFor(double centerY) {

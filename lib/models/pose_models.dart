@@ -14,7 +14,7 @@ class CompositionLayout {
     required this.centerX,
     required this.centerY,
     required this.targetWidthRatio,
-    required this.targetHeightRatio,
+    required this.subjectHeightRatio,
     this.topSafeMargin = .06,
     this.bottomSafeMargin = .05,
     this.sideSafeMargin = .04,
@@ -25,7 +25,7 @@ class CompositionLayout {
   final double centerX;
   final double centerY;
   final double targetWidthRatio;
-  final double targetHeightRatio;
+  final double subjectHeightRatio;
   final double topSafeMargin;
   final double bottomSafeMargin;
   final double sideSafeMargin;
@@ -34,7 +34,10 @@ class CompositionLayout {
   /// Fits a pose into the composition's safe target region without changing
   /// the original silhouette aspect ratio.
   double heightFor(PoseTemplate template) {
-    final availableHeight = targetHeightRatio.clamp(.42, .9);
+    final availableHeight = subjectHeightRatio.clamp(
+      template.minimumHeightRatio,
+      template.maximumHeightRatio,
+    );
     final availableWidth = targetWidthRatio.clamp(.24, .92);
     final widthLimitedHeight = availableWidth / template.aspectRatio;
     final verticalSafeHeight = math.min(
@@ -49,14 +52,33 @@ class CompositionLayout {
           math.min(availableHeight, widthLimitedHeight),
           math.min(verticalSafeHeight, horizontalSafeHeight),
         )
-        .clamp(.42, .9);
+        .clamp(.42, template.maximumHeightRatio);
   }
+
+  CompositionLayout copyWith({
+    CompositionStyle? style,
+    double? centerX,
+    double? centerY,
+    double? targetWidthRatio,
+    double? subjectHeightRatio,
+    String? label,
+  }) => CompositionLayout(
+    style: style ?? this.style,
+    centerX: centerX ?? this.centerX,
+    centerY: centerY ?? this.centerY,
+    targetWidthRatio: targetWidthRatio ?? this.targetWidthRatio,
+    subjectHeightRatio: subjectHeightRatio ?? this.subjectHeightRatio,
+    topSafeMargin: topSafeMargin,
+    bottomSafeMargin: bottomSafeMargin,
+    sideSafeMargin: sideSafeMargin,
+    label: label ?? this.label,
+  );
 
   bool isCloseTo(CompositionLayout other, PoseTemplate template) {
     return style == other.style &&
         (centerX - other.centerX).abs() < .018 &&
         (centerY - other.centerY).abs() < .018 &&
-        (heightFor(template) - other.heightFor(template)).abs() < .08;
+        (heightFor(template) - other.heightFor(template)).abs() < .025;
   }
 
   factory CompositionLayout.defaultFor(PoseTemplate template) =>
@@ -65,10 +87,12 @@ class CompositionLayout {
         centerX: template.centerX,
         centerY: template.centerY,
         targetWidthRatio: .58,
-        targetHeightRatio: template.heightRatio,
+        subjectHeightRatio: template.heightRatio,
         label: '自动居中',
       );
 }
+
+enum PoseShotType { fullBody, threeQuarter, halfBody }
 
 class PosePoint {
   const PosePoint(this.x, this.y, {this.z = 0, this.visibility = 1});
@@ -168,6 +192,9 @@ class PoseTemplate {
     required this.centerX,
     required this.centerY,
     required this.heightRatio,
+    required this.minimumHeightRatio,
+    required this.maximumHeightRatio,
+    required this.shotType,
     required this.aspectRatio,
     required this.keypoints,
   });
@@ -178,6 +205,9 @@ class PoseTemplate {
   final double centerX;
   final double centerY;
   final double heightRatio;
+  final double minimumHeightRatio;
+  final double maximumHeightRatio;
+  final PoseShotType shotType;
   final double aspectRatio;
   final PoseKeypoints keypoints;
 }
@@ -213,6 +243,9 @@ final poseTemplates = <PoseTemplate>[
     centerX: .5,
     centerY: .53,
     heightRatio: .78,
+    minimumHeightRatio: .52,
+    maximumHeightRatio: .86,
+    shotType: PoseShotType.fullBody,
     aspectRatio: .477,
     keypoints: _pose(const [
       PosePoint(.47, .20),
@@ -237,6 +270,9 @@ final poseTemplates = <PoseTemplate>[
     centerX: .5,
     centerY: .52,
     heightRatio: .80,
+    minimumHeightRatio: .52,
+    maximumHeightRatio: .86,
+    shotType: PoseShotType.fullBody,
     aspectRatio: .493,
     keypoints: _pose(const [
       PosePoint(.57, .11),
