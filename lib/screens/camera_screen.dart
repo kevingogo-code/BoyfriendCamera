@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/pose_models.dart';
+import '../services/composition_analyzer.dart';
 import '../services/photo_repository.dart';
 import '../services/pose_analyzer.dart';
 import '../widgets/camera_overlays.dart';
@@ -33,11 +34,13 @@ class _CameraScreenState extends State<CameraScreen>
   CameraController? _controller;
   CameraDescription? _camera;
   final PoseAnalyzer _poseAnalyzer = PoseAnalyzer();
+  final CompositionAnalyzer _compositionAnalyzer = const CompositionAnalyzer();
 
   bool _initializing = false;
   bool _processingFrame = false;
   bool _capturing = false;
   DateTime _lastAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastCompositionAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
   String? _cameraError;
   String? _capturedPath;
   File? _latestPhoto;
@@ -46,6 +49,7 @@ class _CameraScreenState extends State<CameraScreen>
   double _smoothedScore = 0;
   String _instruction = '站在画面内';
   String _stateLabel = '检测中';
+  String _compositionLabel = '自动居中';
   Color _guideColor = Colors.white70;
 
   double _poseScale = 1;
@@ -54,9 +58,19 @@ class _CameraScreenState extends State<CameraScreen>
   Offset _gestureStartOffset = Offset.zero;
   Offset _gestureFocalStart = Offset.zero;
   Size _viewfinderSize = Size.zero;
+  bool _hasManualPoseAdjustment = false;
+  CompositionLayout? _autoLayout;
 
   PoseTemplate? get _activePose =>
       _poseIndex < 0 ? null : poseTemplates[_poseIndex];
+
+  CompositionLayout get _activeLayout {
+    final template = _activePose;
+    if (template == null) {
+      throw StateError('An active pose is required to calculate composition.');
+    }
+    return _autoLayout ?? CompositionLayout.defaultFor(template);
+  }
 
   @override
   void initState() {
@@ -160,14 +174,24 @@ class _CameraScreenState extends State<CameraScreen>
 
   void _analyzeFrame(CameraImage image) {
     final now = DateTime.now();
+    final template = _activePose;
+    if (template != null &&
+        !_hasManualPoseAdjustment &&
+        now.difference(_lastCompositionAnalysis) >=
+            const Duration(milliseconds: 1500)) {
+      _lastCompositionAnalysis = now;
+      _applyCompositionResult(
+        _compositionAnalyzer.analyze(image: image, template: template),
+      );
+    }
     if (_processingFrame ||
         now.difference(_lastAnalysis) < const Duration(milliseconds: 420)) {
       return;
     }
     final controller = _controller;
     final camera = _camera;
-    final template = _activePose;
-    if (controller == null || camera == null || template == null) return;
+    final activeTemplate = _activePose;
+    if (controller == null || camera == null || activeTemplate == null) return;
     _processingFrame = true;
     _lastAnalysis = now;
     _poseAnalyzer
@@ -175,13 +199,21 @@ class _CameraScreenState extends State<CameraScreen>
           image: image,
           camera: camera,
           deviceOrientation: controller.value.deviceOrientation,
-          template: template,
+          template: activeTemplate,
         )
         .then(_applyPoseResult)
         .catchError((Object error, StackTrace stack) {
           if (kDebugMode) debugPrint('Pose analysis failed: $error');
         })
         .whenComplete(() => _processingFrame = false);
+  }
+
+  void _applyCompositionResult(CompositionLayout layout) {
+    if (!mounted || _hasManualPoseAdjustment || _capturedPath != null) return;
+    setState(() {
+      _autoLayout = layout;
+      _compositionLabel = layout.label;
+    });
   }
 
   void _applyPoseResult(PoseFrameResult? result) {
@@ -197,12 +229,13 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     final template = _activePose!;
+    final layout = _activeLayout;
     final score = _smoothedScore * .6 + result.match.score * .4;
     final person = result.keypoints.bounds;
-    final targetHeight = template.heightRatio * _poseScale;
+    final targetHeight = layout.heightRatio * _poseScale;
     final targetWidth = targetHeight * template.aspectRatio;
     final targetCenter =
-        template.centerX +
+        layout.centerX +
         (_viewfinderSize.width == 0
             ? 0
             : _poseOffset.dx / _viewfinderSize.width);
@@ -313,6 +346,10 @@ class _CameraScreenState extends State<CameraScreen>
       _poseIndex = next;
       _poseScale = 1;
       _poseOffset = Offset.zero;
+      _hasManualPoseAdjustment = false;
+      _autoLayout = null;
+      _compositionLabel = '分析背景中';
+      _lastCompositionAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
       _smoothedScore = 0;
       _instruction = '站在轮廓内';
       _stateLabel = '检测中';
@@ -481,6 +518,11 @@ class _CameraScreenState extends State<CameraScreen>
       child: Row(
         children: [
           Text(
+            _compositionLabel,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          const SizedBox(width: 12),
+          Text(
             '贴合度：${_smoothedScore.round()}%',
             style: const TextStyle(fontSize: 12),
           ),
@@ -531,10 +573,11 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Widget _buildSilhouette(PoseTemplate template, Size viewport) {
-    final height = viewport.height * template.heightRatio;
+    final layout = _activeLayout;
+    final height = viewport.height * layout.heightRatio;
     final width = height * template.aspectRatio;
-    final left = viewport.width * template.centerX - width / 2;
-    final top = viewport.height * template.centerY - height / 2;
+    final left = viewport.width * layout.centerX - width / 2;
+    final top = viewport.height * layout.centerY - height / 2;
     return Positioned(
       left: left,
       top: top,
@@ -553,6 +596,8 @@ class _CameraScreenState extends State<CameraScreen>
             },
             onScaleUpdate: (details) {
               setState(() {
+                _hasManualPoseAdjustment = true;
+                _compositionLabel = '手动调整';
                 _poseScale = (_gestureStartScale * details.scale).clamp(
                   .45,
                   1.45,

@@ -1,5 +1,32 @@
 import 'dart:math' as math;
 
+enum CompositionStyle { defaultCenter, centeredSymmetry, leftThird, rightThird }
+
+class CompositionLayout {
+  const CompositionLayout({
+    required this.style,
+    required this.centerX,
+    required this.centerY,
+    required this.heightRatio,
+    required this.label,
+  });
+
+  final CompositionStyle style;
+  final double centerX;
+  final double centerY;
+  final double heightRatio;
+  final String label;
+
+  factory CompositionLayout.defaultFor(PoseTemplate template) =>
+      CompositionLayout(
+        style: CompositionStyle.defaultCenter,
+        centerX: template.centerX,
+        centerY: template.centerY,
+        heightRatio: template.heightRatio,
+        label: '自动居中',
+      );
+}
+
 class PosePoint {
   const PosePoint(this.x, this.y, {this.z = 0, this.visibility = 1});
 
