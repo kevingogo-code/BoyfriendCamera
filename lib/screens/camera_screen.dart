@@ -10,6 +10,7 @@ import '../models/pose_models.dart';
 import '../services/composition_analyzer.dart';
 import '../services/photo_repository.dart';
 import '../services/pose_analyzer.dart';
+import '../services/scene_classifier.dart';
 import '../widgets/camera_overlays.dart';
 import 'album_screen.dart';
 
@@ -35,12 +36,14 @@ class _CameraScreenState extends State<CameraScreen>
   CameraDescription? _camera;
   final PoseAnalyzer _poseAnalyzer = PoseAnalyzer();
   final CompositionAnalyzer _compositionAnalyzer = const CompositionAnalyzer();
+  final SceneClassifier _sceneClassifier = SceneClassifier();
 
   bool _initializing = false;
   bool _processingFrame = false;
   bool _capturing = false;
   DateTime _lastAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastCompositionAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
+  SceneClassification? _scene;
   String? _cameraError;
   String? _capturedPath;
   File? _latestPhoto;
@@ -77,12 +80,22 @@ class _CameraScreenState extends State<CameraScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadLatestPhoto();
+    unawaited(_loadSceneClassifier());
     if (widget.startupError != null) {
       _cameraError = '无法读取相机：${widget.startupError}';
     } else if (widget.cameras.isEmpty) {
       _cameraError = '没有检测到可用相机';
     } else {
       unawaited(_initializeCamera());
+    }
+  }
+
+  Future<void> _loadSceneClassifier() async {
+    try {
+      await _sceneClassifier.load();
+      if (mounted) setState(() {});
+    } catch (error) {
+      if (kDebugMode) debugPrint('Scene classifier failed to load: $error');
     }
   }
 
@@ -182,15 +195,21 @@ class _CameraScreenState extends State<CameraScreen>
         camera != null &&
         !_hasManualPoseAdjustment &&
         now.difference(_lastCompositionAnalysis) >=
-            const Duration(milliseconds: 1500)) {
+            const Duration(milliseconds: 1800)) {
       _lastCompositionAnalysis = now;
+      final candidate = _sceneClassifier.analyze(image);
+      if (candidate != null && candidate.confidence >= .60) {
+        _scene = candidate;
+      }
       _applyCompositionResult(
         _compositionAnalyzer.analyze(
           image: image,
           camera: camera,
           deviceOrientation: controller.value.deviceOrientation,
           template: template,
+          scene: _scene,
         ),
+        scene: _scene,
       );
     }
     if (_processingFrame ||
@@ -215,7 +234,10 @@ class _CameraScreenState extends State<CameraScreen>
         .whenComplete(() => _processingFrame = false);
   }
 
-  void _applyCompositionResult(CompositionLayout layout) {
+  void _applyCompositionResult(
+    CompositionLayout layout, {
+    SceneClassification? scene,
+  }) {
     if (!mounted || _hasManualPoseAdjustment || _capturedPath != null) return;
     final template = _activePose;
     final current = _autoLayout;
@@ -226,7 +248,10 @@ class _CameraScreenState extends State<CameraScreen>
     }
     setState(() {
       _autoLayout = layout;
-      _compositionLabel = layout.label;
+      _compositionLabel =
+          scene == null
+              ? layout.label
+              : '${scene.displayName} · ${layout.label}';
     });
   }
 
@@ -362,6 +387,7 @@ class _CameraScreenState extends State<CameraScreen>
       _poseOffset = Offset.zero;
       _hasManualPoseAdjustment = false;
       _autoLayout = null;
+      _scene = null;
       _compositionLabel = '分析背景中';
       _lastCompositionAnalysis = DateTime.fromMillisecondsSinceEpoch(0);
       _smoothedScore = 0;
@@ -403,6 +429,7 @@ class _CameraScreenState extends State<CameraScreen>
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_controller?.dispose());
     unawaited(_poseAnalyzer.dispose());
+    _sceneClassifier.dispose();
     super.dispose();
   }
 

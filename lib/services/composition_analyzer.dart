@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/services.dart';
 
 import '../models/pose_models.dart';
+import 'scene_classifier.dart';
 
 /// Low-frequency, on-device scene geometry analysis for the camera overlay.
 ///
@@ -30,70 +31,149 @@ class CompositionAnalyzer {
     required CameraDescription camera,
     required DeviceOrientation deviceOrientation,
     required PoseTemplate template,
+    SceneClassification? scene,
   }) {
     if (image.planes.isEmpty || image.width < 2 || image.height < 2) {
-      return CompositionLayout.defaultFor(template);
+      return _forScene(scene, template, CompositionLayout.defaultFor(template));
     }
 
     final rotation = _rotationFor(camera, deviceOrientation);
     final values = _samplePortraitLuma(image, rotation);
-    if (values == null) return CompositionLayout.defaultFor(template);
-    final scene = _inspect(values);
+    if (values == null) {
+      return _forScene(scene, template, CompositionLayout.defaultFor(template));
+    }
+    final features = _inspect(values);
 
     // A strong mirror pattern is the safest signal for doors, corridors and
     // front-facing architecture. It takes precedence over any incidental line.
-    if (scene.symmetry > .72 && scene.energyGap < .12) {
-      final structuralConfidence = ((scene.symmetry - .72) / .28).clamp(
+    if (features.symmetry > .72 && features.energyGap < .12) {
+      final structuralConfidence = ((features.symmetry - .72) / .28).clamp(
         0.0,
         1.0,
       );
-      return CompositionLayout(
-        style: CompositionStyle.centeredSymmetry,
-        centerX: .5,
-        centerY: .51,
-        targetWidthRatio: .46 + structuralConfidence * .12,
-        targetHeightRatio: .68 + structuralConfidence * .14,
-        label: '对称居中',
+      return _forScene(
+        scene,
+        template,
+        CompositionLayout(
+          style: CompositionStyle.centeredSymmetry,
+          centerX: .5,
+          centerY: .51,
+          targetWidthRatio: .46 + structuralConfidence * .12,
+          targetHeightRatio: .68 + structuralConfidence * .14,
+          label: '对称居中',
+        ),
       );
     }
 
     // A pair of diagonals converging inside the frame is typical of paths,
     // railings and stairs. Position the subject just below the convergence so
     // the lines still lead the eye toward them.
-    final vanishingPoint = scene.vanishingPoint;
-    if (vanishingPoint != null && scene.lineConfidence > .18) {
+    final vanishingPoint = features.vanishingPoint;
+    if (vanishingPoint != null && features.lineConfidence > .18) {
       final centerY = (vanishingPoint.dy / _rows + .2).clamp(.46, .62);
       final safeHeight = _safeHeightFor(centerY);
-      final corridorWidth = scene.corridorWidth ?? .46;
-      return CompositionLayout(
-        style: CompositionStyle.leadingLines,
-        centerX: (vanishingPoint.dx / _columns).clamp(.33, .67),
-        centerY: centerY,
-        targetWidthRatio: (corridorWidth * .76).clamp(.32, .62),
-        targetHeightRatio: safeHeight,
-        label: '引导线构图',
+      final corridorWidth = features.corridorWidth ?? .46;
+      return _forScene(
+        scene,
+        template,
+        CompositionLayout(
+          style: CompositionStyle.leadingLines,
+          centerX: (vanishingPoint.dx / _columns).clamp(.33, .67),
+          centerY: centerY,
+          targetWidthRatio: (corridorWidth * .76).clamp(.32, .62),
+          targetHeightRatio: safeHeight,
+          label: '引导线构图',
+        ),
       );
     }
 
     // A substantially quieter side is useful as negative space. Keep it
     // visible by putting the silhouette on the opposite third.
-    if (scene.energyGap > .18) {
-      final leftIsQuieter = scene.leftEnergy < scene.rightEnergy;
-      final spaceStrength = ((scene.energyGap - .18) / .45).clamp(0.0, 1.0);
-      return CompositionLayout(
-        style:
-            leftIsQuieter
-                ? CompositionStyle.rightThird
-                : CompositionStyle.leftThird,
-        centerX: leftIsQuieter ? .67 : .33,
-        centerY: .52,
-        targetWidthRatio: .42 + spaceStrength * .14,
-        targetHeightRatio: .68 + spaceStrength * .1,
-        label: '三分留白',
+    if (features.energyGap > .18) {
+      final leftIsQuieter = features.leftEnergy < features.rightEnergy;
+      final spaceStrength = ((features.energyGap - .18) / .45).clamp(0.0, 1.0);
+      return _forScene(
+        scene,
+        template,
+        CompositionLayout(
+          style:
+              leftIsQuieter
+                  ? CompositionStyle.rightThird
+                  : CompositionStyle.leftThird,
+          centerX: leftIsQuieter ? .67 : .33,
+          centerY: .52,
+          targetWidthRatio: .42 + spaceStrength * .14,
+          targetHeightRatio: .68 + spaceStrength * .1,
+          label: '三分留白',
+        ),
       );
     }
 
-    return CompositionLayout.defaultFor(template);
+    return _forScene(scene, template, CompositionLayout.defaultFor(template));
+  }
+
+  /// Semantic classification changes the fallback composition when the frame
+  /// has no sufficiently strong geometric cue. Strong symmetry/leading-line
+  /// cues still win because they identify the actual usable area precisely.
+  CompositionLayout _forScene(
+    SceneClassification? scene,
+    PoseTemplate template,
+    CompositionLayout geometricLayout,
+  ) {
+    if (scene == null ||
+        scene.confidence < .60 ||
+        geometricLayout.style != CompositionStyle.defaultCenter) {
+      return geometricLayout;
+    }
+    switch (scene.label) {
+      case 'building':
+        return const CompositionLayout(
+          style: CompositionStyle.rightThird,
+          centerX: .67,
+          centerY: .54,
+          targetWidthRatio: .38,
+          targetHeightRatio: .76,
+          label: '楼宇三分构图',
+        );
+      case 'street':
+        return const CompositionLayout(
+          style: CompositionStyle.leadingLines,
+          centerX: .5,
+          centerY: .55,
+          targetWidthRatio: .40,
+          targetHeightRatio: .74,
+          label: '街道引导线',
+        );
+      case 'storefront':
+        return const CompositionLayout(
+          style: CompositionStyle.leftThird,
+          centerX: .34,
+          centerY: .54,
+          targetWidthRatio: .40,
+          targetHeightRatio: .73,
+          label: '店铺留白构图',
+        );
+      case 'urban_nature':
+        return const CompositionLayout(
+          style: CompositionStyle.rightThird,
+          centerX: .66,
+          centerY: .53,
+          targetWidthRatio: .42,
+          targetHeightRatio: .72,
+          label: '绿意留白构图',
+        );
+      case 'busy':
+        return CompositionLayout(
+          style: CompositionStyle.defaultCenter,
+          centerX: .5,
+          centerY: .52,
+          targetWidthRatio: .44,
+          targetHeightRatio: template.heightRatio.clamp(.66, .74),
+          label: '热闹街景居中',
+        );
+      default:
+        return geometricLayout;
+    }
   }
 
   double _safeHeightFor(double centerY) {
