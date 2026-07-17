@@ -2,8 +2,11 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'screens/camera_screen.dart';
+import 'screens/app_shell.dart';
+import 'screens/onboarding_screen.dart';
+import 'services/app_preferences.dart';
 import 'services/photo_repository.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,48 +19,62 @@ Future<void> main() async {
   } catch (error) {
     startupError = error;
   }
+  final preferences = AppPreferences();
+  final showOnboarding = await preferences.shouldShowOnboarding();
 
   runApp(
     BoyfriendCameraApp(
       cameras: cameras,
       startupError: startupError,
       photoRepository: PhotoRepository(),
+      preferences: preferences,
+      showOnboarding: showOnboarding,
     ),
   );
 }
 
-class BoyfriendCameraApp extends StatelessWidget {
+class BoyfriendCameraApp extends StatefulWidget {
   const BoyfriendCameraApp({
     super.key,
     required this.cameras,
     required this.photoRepository,
+    this.preferences,
     this.startupError,
+    this.showOnboarding = false,
   });
 
   final List<CameraDescription> cameras;
   final PhotoRepository photoRepository;
+  final AppPreferences? preferences;
   final Object? startupError;
+  final bool showOnboarding;
+
+  @override
+  State<BoyfriendCameraApp> createState() => _BoyfriendCameraAppState();
+}
+
+class _BoyfriendCameraAppState extends State<BoyfriendCameraApp> {
+  late bool _showOnboarding = widget.showOnboarding;
+
+  Future<void> _finishOnboarding() async {
+    await widget.preferences?.completeOnboarding();
+    if (mounted) setState(() => _showOnboarding = false);
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '男友相机',
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: Colors.black,
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF007AFF),
-          secondary: Color(0xFF34C759),
-          surface: Color(0xFF1C1C1E),
-        ),
-        useMaterial3: true,
-      ),
-      home: CameraScreen(
-        cameras: cameras,
-        photoRepository: photoRepository,
-        startupError: startupError,
-      ),
+      title: 'AI 相机',
+      theme: buildAppTheme(),
+      home:
+          _showOnboarding
+              ? OnboardingScreen(onComplete: _finishOnboarding)
+              : AppShell(
+                cameras: widget.cameras,
+                photoRepository: widget.photoRepository,
+                startupError: widget.startupError,
+              ),
     );
   }
 }

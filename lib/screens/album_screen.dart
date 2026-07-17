@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../services/photo_repository.dart';
-import 'photo_view_screen.dart';
+import '../theme/app_theme.dart';
+import '../widgets/app_widgets.dart';
+import 'photo_detail_screen.dart';
 
 class AlbumScreen extends StatefulWidget {
   const AlbumScreen({super.key, required this.repository});
@@ -15,92 +17,112 @@ class AlbumScreen extends StatefulWidget {
 }
 
 class _AlbumScreenState extends State<AlbumScreen> {
-  late Future<List<File>> _photos;
-
-  @override
-  void initState() {
-    super.initState();
-    _photos = widget.repository.listPhotos();
-  }
+  late final Future<List<File>> _photos = widget.repository.listPhotos();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: const Text('相册'),
-        actions: [
-          FutureBuilder<List<File>>(
-            future: _photos,
-            builder:
-                (_, snapshot) => Padding(
-                  padding: const EdgeInsets.only(right: 20),
-                  child: Center(
-                    child: Text(
-                      '共 ${snapshot.data?.length ?? 0} 张',
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ),
-          ),
-        ],
-      ),
-      body: FutureBuilder<List<File>>(
+    return SafeArea(
+      child: FutureBuilder<List<File>>(
         future: _photos,
         builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
           final photos = snapshot.data ?? const <File>[];
-          if (photos.isEmpty) {
-            return const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.photo_library_outlined,
-                    size: 72,
-                    color: Colors.white24,
-                  ),
-                  SizedBox(height: 16),
-                  Text('暂无照片', style: TextStyle(color: Colors.white38)),
-                ],
-              ),
-            );
-          }
-          return GridView.builder(
-            padding: const EdgeInsets.all(2),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 2,
-              mainAxisSpacing: 2,
-            ),
-            itemCount: photos.length,
-            itemBuilder:
-                (context, index) => InkWell(
-                  onTap:
-                      () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => PhotoViewScreen(photo: photos[index]),
+          return CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 34, 16, 0),
+                sliver: SliverList.list(
+                  children: [
+                    PageTitle(
+                      '相册',
+                      trailing: IconButton(
+                        onPressed: () {},
+                        icon: const Icon(
+                          Icons.search,
+                          color: AppColors.secondaryText,
                         ),
                       ),
-                  child: Hero(
-                    tag: photos[index].path,
-                    child: Image.file(
-                      photos[index],
-                      fit: BoxFit.cover,
-                      cacheWidth: 360,
-                      errorBuilder:
-                          (_, __, ___) => const ColoredBox(
-                            color: Color(0xFF1C1C1E),
-                            child: Icon(Icons.broken_image_outlined),
+                    ),
+                    const SizedBox(height: 22),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: AppColors.line),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '共 ${photos.length} 张照片 · 推荐 ${(photos.length * .6).round()} 张',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
+                          const SizedBox(height: 6),
+                          const Text(
+                            '公园 · 街拍 · 旅行',
+                            style: TextStyle(
+                              color: AppColors.secondaryText,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      '全部照片',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
+              ),
+              if (snapshot.connectionState != ConnectionState.done)
+                const SliverFillRemaining(
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (photos.isEmpty)
+                const SliverFillRemaining(
+                  child: Center(
+                    child: Text(
+                      '还没有照片，去拍一组吧',
+                      style: TextStyle(color: AppColors.secondaryText),
                     ),
                   ),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  sliver: SliverGrid.builder(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                          childAspectRatio: .82,
+                        ),
+                    itemCount: photos.length,
+                    itemBuilder:
+                        (context, index) => PhotoTile(
+                          file: photos[index],
+                          recommended: index % 3 != 1,
+                          radius: 8,
+                          onTap:
+                              () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder:
+                                      (_) => PhotoDetailScreen(
+                                        photo: photos[index],
+                                      ),
+                                ),
+                              ),
+                        ),
+                  ),
                 ),
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            ],
           );
         },
       ),
